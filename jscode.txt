@@ -1,0 +1,90 @@
+function scrapeTwitter() {
+    const tweetsMap = new Map();
+    let stopScrolling = false;
+    let waitCount = 0;
+    const maxWaitCount = 3; // 最多等待次数
+
+    function collectTweets() {
+        let tweetElements = document.querySelectorAll('article');
+
+        tweetElements.forEach(tweet => {
+            try {
+                let timeElement = tweet.querySelector('time');
+                if (!timeElement) {
+                    // 跳过没有time字段的推文（广告）
+                    return;
+                }
+
+                let contentElement = tweet.querySelector('div[lang]');
+                let linkElement = tweet.querySelector('a[href*="/status/"]');
+                let userElement = tweet.querySelector('div[dir="ltr"] > span > span');
+
+                if (contentElement && linkElement && userElement) {
+                    let tweetData = {
+                        time: timeElement.getAttribute('datetime'),
+                        content: contentElement.innerText,
+                        link: `https://twitter.com${linkElement.getAttribute('href')}`,
+                        user: userElement.innerText
+                    };
+
+                    // 使用链接作为唯一键，确保推文唯一性
+                    tweetsMap.set(tweetData.link, tweetData);
+                }
+            } catch (e) {
+                console.error('Error extracting tweet data:', e);
+            }
+        });
+
+        // 显示进度
+        console.log(`已收集 ${tweetsMap.size} 条推文`);
+    }
+
+    function scrollAndCollect() {
+        if (stopScrolling) {
+            // 滚动完成，输出结果并保存到文件
+            const tweetsArray = Array.from(tweetsMap.values());
+            console.log(tweetsArray);
+            saveTweetsToFile(tweetsArray);
+            return;
+        }
+
+        const initialHeight = document.body.scrollHeight;
+        window.scrollTo(0, document.body.scrollHeight);
+        console.log('页面滚动中...');
+
+        // 检查页面高度变化
+        setTimeout(() => {
+            const newHeight = document.body.scrollHeight;
+            if (newHeight > initialHeight) {
+                waitCount = 0; // 重置等待计数
+                collectTweets();
+                scrollAndCollect();
+            } else {
+                waitCount++;
+                console.log(`等待新推文加载... 尝试次数: ${waitCount}`);
+                if (waitCount >= maxWaitCount) {
+                    stopScrolling = true;
+                    console.log('等待时间过长，停止滚动并保存推文。');
+                    scrollAndCollect();
+                } else {
+                    setTimeout(scrollAndCollect, 3000); // 3秒后重新检查
+                }
+            }
+        }, 3000); // 等待3秒以确保新推文加载完成
+    }
+
+    function saveTweetsToFile(tweets) {
+        const blob = new Blob([JSON.stringify(tweets, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'tweets.json';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    collectTweets(); // 初次收集
+    scrollAndCollect(); // 开始滚动收集
+}
